@@ -1,5 +1,5 @@
-# imap-attachment-exporter
-IMAP attachment exporter, with optional Thunderbird detach mode.
+# imap-attachment-extractor
+IMAP attachment extractor, with optional Thunderbird detach mode.
 
 
 #### Prequisites

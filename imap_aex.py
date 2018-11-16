@@ -58,13 +58,13 @@ from imaplib import IMAP4_SSL, IMAP4, Time2Internaldate, ParseFlags
 from time import time
 
 import keyring
-from docopt import docopt
+from docopt import docopt, parse_defaults
 
 
 class ImapAttachmentExtractor:
-    def __init__(self, host, login, port=993, folder='INBOX', extract_dir="./", use_subdir=True, ignore_inbox_subdir=False,
+    def __init__(self, host, login, port=993, folder='INBOX', extract_dir="./", no_subdir=False, ignore_inbox_subdir=False,
                  thunderbird_mode=True, max_size='100K', flagged_action="skip", extract_only=False,
-                 extract_inline_images=False, dry_run=False, ask_password=False, debug=False, verbose=False):
+                 inline_images=False, dry_run=False, ask_password=False, debug=False, verbose=False):
         """IMAP Attachment extractor.
 
         :param str host: IMAP host name.
@@ -72,13 +72,13 @@ class ImapAttachmentExtractor:
         :param int port: IMAP SSL port. (default: 993)
         :param str folder: Mail folder. (default: INBOX)
         :param str extract_dir: Extract directory. (default: ./)
-        :param bool use_subdir: Create folder sub-directories inside extract dir. (default: True)
+        :param bool no_subdir: Don't create folder sub-directories inside extract dir. (default: False)
         :param bool ignore_inbox_subdir: When creating subdirectories, ignore INBOX as first directory. (default: False)
         :param bool thunderbird_mode: Thunderbird detach mode. (default: True)
         :param int|str max_size: Extract only attachment bigger than this size.  (default: 100K)
         :param str flagged_action: Flagged/starred message behaviour. [detach, extract, skip] (default: skip)
         :param bool extract_only: Extract only attachments, don't detach from messages. (default: False)
-        :param bool extract_inline_images: Handle inline images as attachments. (default: False)
+        :param bool inline_images: Handle inline images as attachments. (default: False)
         :param bool dry_run: Dump information, and leave the server intact. (default: False)
         :param bool ask_password: Prompt for password instead of looking in keyring. (default: False)
         :param bool debug: Debug mode, don't delete original message. (default: False)
@@ -106,14 +106,14 @@ class ImapAttachmentExtractor:
         self.subdir_path = list(map(lambda x: x.capitalize(), self.folder.split("/")))
         self.thunderbird_mode = thunderbird_mode
         self.extract_dir = os.path.abspath(extract_dir)
-        self.use_subdir = use_subdir
+        self.no_subdir = no_subdir
         self.ignore_inbox_subdir = ignore_inbox_subdir
-        if self.use_subdir and self.subdir_path:
+        if not self.no_subdir and self.subdir_path:
             if self.ignore_inbox_subdir and len(self.subdir_path) > 1 and self.subdir_path[0] == 'Inbox':
                 self.subdir_path.pop(0)
 
             self.extract_dir = os.path.join(self.extract_dir, *self.subdir_path)
-        self.extract_inline_images = extract_inline_images
+        self.inline_images = inline_images
         self.dry_run = dry_run
         self.flagged_action = flagged_action
         self.extract_only = extract_only
@@ -297,7 +297,7 @@ class ImapAttachmentExtractor:
                 continue  # skip simple messages
 
             reg_attachment = "attachment|application"
-            if self.extract_inline_images:
+            if self.inline_images:
                 reg_attachment = reg_attachment+"|image"
 
             has_attachments = re.match('^.*"(%s)".*$' % reg_attachment, structure.decode("utf-8")) is not None
@@ -330,7 +330,10 @@ class ImapAttachmentExtractor:
 
             subject, encoding = decode_header(mail.get("Subject"))[0]
             if encoding:
-                subject = subject.decode(encoding)
+                if not encoding.startswith('unknown'):
+                    subject = subject.decode(encoding)
+                else:
+                    subject = str(subject)
             elif type(subject) == bytes:
                 subject = subject.decode()
 
@@ -445,7 +448,7 @@ class ImapAttachmentExtractor:
             if nb_extraction > 0 and not self.extract_only and ('detach' == self.flagged_action or not is_flagged):
                 if not self.dry_run:
                     print("  Extracted %s attachment%s, replacing email." % (nb_extraction, "s" if nb_extraction > 1 else ""))
-                    status, append_data = self.imap.append(self.folder, " ".join(flags), '', str(new_mail).encode("utf-8"))
+                    status, append_data = self.imap.append(self.folder, " ".join(flags), '', new_mail.as_bytes())
                     # status, append_data = self.imap.append(self.folder, '', '', str(new_mail).encode("utf-8"))
                     if status != "OK":
                         print("  Could not append message to IMAP server.")
@@ -585,81 +588,89 @@ def parse_configuration(conf_file='config.ini'):
     return config
 
 
-def main(options):
+def main(options, defaults):
     # parse options not in configuration
     conf_file = options['--conf']  # type: str
     list_folders =  options['--list']  # type: bool
-    
+
+    # arguments definition
+    arguments = {
+        ('host',                'HOST',                     '[imap] host',                      str),
+        ('login',               'USER',                     '[imap] login',                     str),
+        ('port',                '--port',                   '[imap] port',                      int),
+
+        ('date_def',            '--date',                   '[parameters] date',                str),
+        ('fetch_all',           '--all',                    '[parameters] all',                 bool),
+
+        ('folder',              '--folder',                 '[parameters] folder',              str),
+        ('extract_dir',         '--extract-dir',            '[parameters] extract-dir',         str),
+        ('max_size',            '--max-size',               '[parameters] max-size',            str),
+        ('flagged_action',      '--flagged',                '[parameters] flagged',             str),
+
+        ('no_subdir',           '--no-subdir',              '[options] no-subdir',              bool),
+        ('ignore_inbox_subdir', '--ignore-inbox-subdir',    '[options] ignore-inbox-subdir',    bool),
+        ('thunderbird_mode',    '--thunderbird',            '[options] thunderbird',            bool),
+        ('extract_only',        '--extract-only',           '[options] extract-only',           bool),
+        ('inline_images',       '--inline-images',          '[options] inline-images',          bool),
+        ('dry_run',             '--dry-run',                '[options] dry-run',                bool),
+        ('ask_password',        '--password',               '[options] password',               bool),
+        ('debug',               '--debug',                  '[options] debug',                  bool),
+        ('verbose',             '--verbose',                '[options] verbose',                bool),
+    }
+
+    kwargs = {}
+
     # parse configuration file
     config = parse_configuration(conf_file)
+    for a in arguments:
+        # ConfigParser section and option name
+        match = re.match('^\[(.*)\] (.*)$', a[2])
+        section = match.group(1)
+        option = match.group(2)
 
-    host =                  config.get('imap', 'host', fallback=None)
-    login =                 config.get('imap', 'login', fallback=None)
-    port =                  config.getint('imap', 'port', fallback=None)
+        if a[3] == int:
+            kwargs[a[0]] = config.getint(section, option, fallback=None)
+        elif a[3] == bool:
+            kwargs[a[0]] = config.getboolean(section, option, fallback=None)
+        else:
+            kwargs[a[0]] = config.get(section, option, fallback=None)
 
-    date_def =              config.get('parameters', 'date', fallback=None)
-    fetch_all =             config.getboolean('parameters', 'all', fallback=None)
+    # calculate overwrite
+    overwrite = {}
+    for a in arguments:
+        overwrite[a[0]] = (options.get(a[1], None) != defaults.get(a[1], None))
 
-    folder =                config.get('parameters', 'folder', fallback=None)
-    extract_dir =           config.get('parameters', 'extract-dir', fallback=None)
-    max_size =              config.get('parameters', 'max-size', fallback=None)
-    flagged_action =        config.get('parameters', 'flagged', fallback=None)
+    # parse options
+    for a in arguments:
+        if kwargs[a[0]] is None or overwrite[a[0]]:
+            if a[3] == int:
+                kwargs[a[0]] = int(options[a[1]])
+            else:
+                kwargs[a[0]] = options[a[1]]
 
-    use_subdir =            not config.getboolean('options', 'no-subdir', fallback=None)
-    ignore_inbox_subdir =   config.getboolean('options', 'ignore-inbox-subdir', fallback=None)
-    thunderbird_mode =      config.getboolean('options', 'thunderbird', fallback=None)
-    extract_only =          config.getboolean('options', 'extract-only', fallback=None)
-    inline_images =         config.getboolean('options', 'inline-images', fallback=None)
-    dry_run =               config.getboolean('options', 'dry-run', fallback=None)
-    ask_password =          config.getboolean('options', 'password', fallback=None)
+    # extract arguments
+    extract_kwargs = {
+        'date_def':     kwargs.pop('date_def'),
+        'fetch_all':    kwargs.pop('fetch_all')
+    }
 
-    debug =                 config.getboolean('options', 'debug', fallback=None)
-    verbose =               config.getboolean('options', 'verbose', fallback=None)
-        
-    # parse options        
-    host =                  options['HOST'] if host is None else host  # type: str
-    login =                 options['USER'] if login is None else login  # type: str
-    port =                  int(options['--port']) if port is None else port  # type: int
-
-    date_def =              options['--date'] if date_def is None else date_def  # type: str
-    fetch_all =             options['--all'] if fetch_all is None else fetch_all  # type: bool
-
-    folder =                options['--folder'] if folder is None else folder  # type: str
-    extract_dir =           options['--extract-dir'] if extract_dir is None else extract_dir  # type: str
-    max_size =              options['--max-size'] if max_size is None else max_size  # type: str
-    flagged_action =        options['--flagged'] if flagged_action is None else flagged_action  # type: str
-
-    use_subdir =            not options['--no-subdir'] if use_subdir is None else use_subdir  # type: bool
-    ignore_inbox_subdir =   options['--ignore-inbox-subdir'] if ignore_inbox_subdir is None else ignore_inbox_subdir  # type: bool
-    thunderbird_mode =      options['--thunderbird'] if thunderbird_mode is None else thunderbird_mode  # type: bool
-    extract_only =          options['--extract-only'] if extract_only is None else extract_only  # type: bool
-    inline_images =         options['--inline-images'] if inline_images is None else inline_images  # type: bool
-    dry_run =               options['--dry-run'] if dry_run is None else dry_run  # type: bool
-    ask_password =          options['--password'] if ask_password is None else ask_password  # type: bool
-
-    debug =                 options['--debug'] if debug is None else debug  # type: bool
-    verbose =               options['--verbose'] if verbose is None else verbose  # type: bool
-
-    with ImapAttachmentExtractor(
-        host=host, login=login, port=port,
-        folder=folder, extract_dir=extract_dir, max_size=max_size,
-        flagged_action=flagged_action, use_subdir=use_subdir, ignore_inbox_subdir=ignore_inbox_subdir,
-        thunderbird_mode=thunderbird_mode, extract_only=extract_only,
-        extract_inline_images=inline_images, dry_run=dry_run,
-        ask_password=ask_password, debug=debug, verbose=verbose
-    ) as imap:
-
+    # Launch imap attachment extractor
+    with ImapAttachmentExtractor(**kwargs) as imap:
+        # folder list and exit
         if list_folders:
             imap.list()
             return
 
-        imap.extract(date_def, fetch_all)
+        # launch extractor
+        imap.extract(**extract_kwargs)
 
 
 def cli():
     options = docopt(__doc__)
+    defaults = dict(map(lambda x: (x.long, x.value), parse_defaults(__doc__)))
+
     try:
-        main(options)
+        main(options, defaults)
     except RuntimeWarning as w:
         print("  Warning: %s" % w, file=sys.stderr)
         sys.exit(1)

@@ -140,10 +140,11 @@ class ImapAttachmentExtractor:
         print()
 
     @staticmethod
-    def parse_date(date_def):
+    def parse_date(date_def, date_format="imap"):
         """Parse and format a date definition.
 
         :param str date_def: The date(s) definition.
+        :param str date_format: The date format to output. [imap, ymd] (default: imap)
         :return: A tuple of ON, SINCE, and BEFORE dates formatted according to IMAP requirements.
         :rtype: (str, str, str)
         """
@@ -154,6 +155,11 @@ class ImapAttachmentExtractor:
         ret_date_on = None
         ret_date_since = None
         ret_date_before = None
+
+        if date_format == "imap":
+            date_format = "%d-%b-%Y"
+        elif date_format == "ymd":
+            date_format = "%Y-%m-%d"
 
         match = re.match("^([<>])?\s*(\d{4})-?(\d{2})?-?(\d{2})?(\s*to\s*)?(\d{4})?-?(\d{2})?-?(\d{2})?", date_def)
         if not match:
@@ -212,13 +218,13 @@ class ImapAttachmentExtractor:
                     date_before = date(y2, m2, d2)
 
         if type(date_since) == date:
-            ret_date_since = date_since.strftime("%d-%b-%Y")
+            ret_date_since = date_since.strftime(date_format)
 
         if type(date_before) == date:
-            ret_date_before = date_before.strftime("%d-%b-%Y")
+            ret_date_before = date_before.strftime(date_format)
 
         if type(date_on) == date:
-            ret_date_on = date_on.strftime("%d-%b-%Y")
+            ret_date_on = date_on.strftime(date_format)
 
         return ret_date_on, ret_date_since, ret_date_before
 
@@ -252,6 +258,7 @@ class ImapAttachmentExtractor:
             raise RuntimeWarning("Date criteria not found, use 'all' parameter to fetch all messages.")
         elif date_def:
             date_on, date_since, date_before = self.parse_date(date_def)
+            dates = self.parse_date(date_def, "ymd")
 
             date_crit = []
             if date_on:
@@ -265,12 +272,7 @@ class ImapAttachmentExtractor:
         else:
             date_crit = []
 
-        # status, search_data = self.imap.search("UTF-8", 'UNDELETED', 'SINCE "%s"' % since)
-        # status, search_data = self.imap.search("UTF-8", 'UNDELETED', 'ON "15-nov-2018"')
-        # status, search_data = self.imap.search("UTF-8", 'UNDELETED', 'ON "31-oct-2018"')
-        # status, search_data = self.imap.search("UTF-8", 'UNDELETED', 'ON "26-aug-2018"')
         # status, search_data = self.imap.search("UTF-8", 'UNDELETED', 'ON "27-aug-2018"')
-
         status, search_data = self.imap.search("UTF-8", 'UNDELETED', *date_crit)
         if status != "OK":
             raise RuntimeWarning("Could not search in %s" % folder)
@@ -344,6 +346,25 @@ class ImapAttachmentExtractor:
             if date_match:
                 mail_date = date_match.group(1)
             mail_date = datetime.strptime(mail_date, "%a, %d %b %Y %H:%M:%S")
+
+            if dates is not None:
+                date_ok = False
+                check_date = mail_date.strftime("%Y-%m-%d")
+
+                if dates[0]:
+                    date_ok = check_date == dates[0]
+                else:
+                    if dates[1] and not dates[2]:
+                        date_ok = check_date >= dates[1]
+                    elif dates[2] and not dates[1]:
+                        date_ok = check_date <= dates[2]
+                    elif dates[1] and dates[2]:
+                        date_ok = dates[1] <= check_date <= dates[2]
+
+                if not date_ok:
+                    if self.verbose:
+                        print("\nSkip email: '%s' [%s] (possible previous extract)." % (subject, mail_date))
+                    continue
 
             new_mail = EmailMessage()
             new_mail._headers = mail._headers

@@ -15,7 +15,7 @@
 [options]
 ; no-subdir=no
 ; ignore-inbox-subdir=no
-; thunderbird=yes
+; thunderbird=no
 ; extract-only=no
 ; inline-images=no
 ; dry-run=no

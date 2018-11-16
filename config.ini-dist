@@ -1,0 +1,25 @@
+[imap]
+; host=
+; login=
+; port=993
+
+[parameters]
+; date=
+; all=no
+
+; folder=INBOX
+; extract-dir=./
+; max-size=100K
+; flagged-action=skip
+
+[options]
+; no-subdir=no
+; ignore-inbox-subdir=no
+; thunderbird=yes
+; extract-only=no
+; inline-images=no
+; dry-run=no
+; password=no
+
+; verbose=no
+; debug=no

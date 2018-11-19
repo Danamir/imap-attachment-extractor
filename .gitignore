@@ -23,7 +23,7 @@ nosetests.xml
 .coverage
 coverage.xml
 cover
-config.ini
+config*.ini
 .csync_*
 .owncloud*
 *.iml

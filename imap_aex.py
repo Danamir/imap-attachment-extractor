@@ -13,7 +13,7 @@ Arguments:
 Options:
      --all                  Fetch all mail. Not recommended, prefer --date usage.
   -c --conf=<c>             Optional configuration file, containing any of the command line options values. [Default: config.ini]
-  -d --date=<d>             Date defininition, formatted as [<>]date[to][date]. Date can be y, y-m, or y-m-d. Examples:
+  -d --date=<d>             Date defininition, formatted as [<>]date[to][date]. Date can be y, y-m, or y-m-d.
                               - 2012-12-21 : on this day
                               - 2012-12 : on this month
                               - 2012 : on this year
@@ -23,19 +23,25 @@ Options:
 
      --dry-run              Dump running information and leave the server intact.
      --debug                Debug mode, don't delete messages.
+     --dir-reg=<r>          Replace Regular expression to be applied before creating directories.
+                            Optional replacement separated by ">>", otherwise delete the match.
+                            Multiple expressions separated by "::".
+                              - ^INBOX\/?                   Remove "INBOX" and "INBOX/" subdirectory completely
+                              - ^INBOX$>>Inbox::INBOX\/     Replace "INBOX" by "Inbox", and ignore it as subdirectory.
+                              - ^Drafts$>>Brouillons        Replace by translation.
+
   -e --extract-dir=<d>      Extract attachment to this directory. [Default: ./]
      --extract-only         Don't detach attachments, only extract.
      --flagged=<f>          Flagged/starred mail behaviour: [Default: skip]
                               - detach:     detach as a normal mail.
                               - extract:    extract only, leave message intact.
                               - skip:       don't extract, leave message intact.
-
   -f --folder=<f>           Mail folder. [Default: INBOX]
-     --ignore-inbox-subdir  When creating subdirectories, ignore INBOX as first directory.
+
      --inline-images        Handle inline images as attachments.
      --list                 List the server folders and exit.
      --max-size=<m>         Extract attachments bigger than this size. [Default: 100K]
-     --no-subdir            Don't create subdirectories inside extract dir, corresponding to mail folder.
+     --no-subdir            Don't create folder subdirectories inside extract dir.
      --password             Prompt for password instead of looking in keyring.
   -p --port=<p>             IMAP host SSL port. [Default: 993]
      --thunderbird          Implements thunderbird detach mode, pointing to the extracted file local URL.
@@ -46,7 +52,7 @@ import sys
 from binascii import Error as BinasciiError
 import os
 import re
-from base64 import b64decode
+from base64 import b64decode, b64encode
 import getpass
 from configparser import ConfigParser
 
@@ -62,7 +68,7 @@ from docopt import docopt, parse_defaults
 
 
 class ImapAttachmentExtractor:
-    def __init__(self, host, login, port=993, folder='INBOX', extract_dir="./", no_subdir=False, ignore_inbox_subdir=False,
+    def __init__(self, host, login, port=993, folder='INBOX', extract_dir="./", no_subdir=False, dir_reg=None,
                  thunderbird_mode=True, max_size='100K', flagged_action="skip", extract_only=False,
                  inline_images=False, dry_run=False, ask_password=False, debug=False, verbose=False):
         """IMAP Attachment extractor.
@@ -73,7 +79,9 @@ class ImapAttachmentExtractor:
         :param str folder: Mail folder. (default: INBOX)
         :param str extract_dir: Extract directory. (default: ./)
         :param bool no_subdir: Don't create folder sub-directories inside extract dir. (default: False)
-        :param bool ignore_inbox_subdir: When creating subdirectories, ignore INBOX as first directory. (default: False)
+        :param str dir_reg: Optional regexp to apply when creating subdirectories.
+                            Optional replacement separated by ">>", otherwise delete the match.
+                            Multiple expressions separated by "::".
         :param bool thunderbird_mode: Thunderbird detach mode. (default: True)
         :param int|str max_size: Extract only attachment bigger than this size.  (default: 100K)
         :param str flagged_action: Flagged/starred message behaviour. [detach, extract, skip] (default: skip)
@@ -103,16 +111,25 @@ class ImapAttachmentExtractor:
 
         # configuration
         self.folder = folder
-        self.subdir_path = list(map(lambda x: x.capitalize(), self.folder.split("/")))
         self.thunderbird_mode = thunderbird_mode
         self.extract_dir = os.path.abspath(extract_dir)
         self.no_subdir = no_subdir
-        self.ignore_inbox_subdir = ignore_inbox_subdir
-        if not self.no_subdir and self.subdir_path:
-            if self.ignore_inbox_subdir and len(self.subdir_path) > 1 and self.subdir_path[0] == 'Inbox':
-                self.subdir_path.pop(0)
+        self.dir_reg = []
+        if dir_reg is not None:
+            dir_reg = dir_reg.replace('::', '__reg__').replace('>>', '__repl__')
+            for reg in dir_reg.split('__reg__'):
+                self.dir_reg.append(tuple(reg.split('__repl__')))
 
-            self.extract_dir = os.path.join(self.extract_dir, *self.subdir_path)
+        subdir_path = self.folder
+        if not self.no_subdir and subdir_path:
+            if self.dir_reg:
+                for dr in self.dir_reg:
+                    m = dr[0]
+                    s = dr[1] if len(dr) > 1 else ''
+                    subdir_path = re.sub(m, s, subdir_path)
+
+            self.extract_dir = os.path.join(self.extract_dir, *subdir_path.split('/'))
+
         self.inline_images = inline_images
         self.dry_run = dry_run
         self.flagged_action = flagged_action
@@ -133,9 +150,31 @@ class ImapAttachmentExtractor:
         if status != "OK":
             raise RuntimeWarning("Could not list folders")
 
+        folders = []
+        max_len = 0
+        for folder in list_data:
+            folder = folder.split(b' "/" ')[1].decode()
+            folder = imaputf7decode(folder)
+            folder = re.sub('(^"|"$)', '', folder)
+            max_len = max(max_len, len(folder))
+            folders.append(folder)
+
         print("Folder list:")
-        for f in list_data:
-            print('  '+f.split(b' "/" ')[1].decode('utf-8'))
+        print('  Folder'.ljust(max_len+4), 'Extract subdirectory')
+        print('  '.ljust(max_len+4, '-'), ''.ljust(30, '-'))
+        for folder in folders:
+            extract_dir = self.extract_dir
+            subdir_path = folder
+            if not self.no_subdir and subdir_path:
+                if self.dir_reg:
+                    for dr in self.dir_reg:
+                        m = dr[0]
+                        s = dr[1] if len(dr) > 1 else ''
+                        subdir_path = re.sub(m, s, subdir_path)
+
+                extract_dir = os.path.join(*subdir_path.split('/'))
+
+            print('  '+folder.ljust(max_len+2), extract_dir)
 
         print()
 
@@ -247,7 +286,7 @@ class ImapAttachmentExtractor:
         if " " in self.folder:
             folder = '"%s"' % folder
 
-        status, select_data = self.imap.select(folder)
+        status, select_data = self.imap.select(imaputf7encode(folder))
         if status != "OK":
             raise RuntimeWarning("Could not select %s" % folder)
 
@@ -594,6 +633,45 @@ def human_readable_size_to_bytes(size_label, suffix='B'):
     return size
 
 
+def b64padanddecode(b):
+    """Decode unpadded base64 data"""
+    b += (-len(b) % 4) * '='  # base64 padding (if adds '===', no valid padding anyway)
+    return b64decode(b, altchars='+,', validate=True).decode('utf-16-be')
+
+
+def imaputf7decode(s):
+    """Decode a string encoded according to RFC2060 aka IMAP UTF7.
+
+    Minimal validation of input, only works with trusted data"""
+    lst = s.split('&')
+    out = lst[0]
+    for e in lst[1:]:
+        u, a = e.split('-', 1)  # u: utf16 between & and 1st -, a: ASCII chars folowing it
+        if u == '':
+            out += '&'
+        else:
+            out += b64padanddecode(u)
+        out += a
+    return out
+
+
+def imaputf7encode(s):
+    """"Encode a string into RFC2060 aka IMAP UTF7"""
+    s = s.replace('&', '&-')
+    unipart = out = ''
+    for c in s:
+        if 0x20 <= ord(c) <= 0x7f:
+            if unipart != '':
+                out += '&' + b64encode(unipart.encode('utf-16-be')).decode('ascii').rstrip('=') + '-'
+                unipart = ''
+            out += c
+        else:
+            unipart += c
+    if unipart != '':
+        out += '&' + b64encode(unipart.encode('utf-16-be')).decode('ascii').rstrip('=') + '-'
+    return out
+
+
 def parse_configuration(conf_file='config.ini'):
     """Parse configuration file.
 
@@ -627,9 +705,9 @@ def main(options, defaults):
         ('extract_dir',         '--extract-dir',            '[parameters] extract-dir',         str),
         ('max_size',            '--max-size',               '[parameters] max-size',            str),
         ('flagged_action',      '--flagged',                '[parameters] flagged',             str),
+        ('dir_reg',             '--dir-reg',                '[parameters] dir-reg',             str),
 
         ('no_subdir',           '--no-subdir',              '[options] no-subdir',              bool),
-        ('ignore_inbox_subdir', '--ignore-inbox-subdir',    '[options] ignore-inbox-subdir',    bool),
         ('thunderbird_mode',    '--thunderbird',            '[options] thunderbird',            bool),
         ('extract_only',        '--extract-only',           '[options] extract-only',           bool),
         ('inline_images',       '--inline-images',          '[options] inline-images',          bool),

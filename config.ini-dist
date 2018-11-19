@@ -11,6 +11,7 @@
 ; extract-dir=./
 ; max-size=100K
 ; flagged-action=skip
+; dir-reg=
 
 [options]
 ; no-subdir=no

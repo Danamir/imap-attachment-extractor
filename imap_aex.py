@@ -44,6 +44,7 @@ Options:
      --no-subdir            Don't create folder subdirectories inside extract dir.
      --password             Prompt for password instead of looking in keyring.
   -p --port=<p>             IMAP host SSL port. [Default: 993]
+     --run                  Force running, even if dry-run found in config file.
      --thunderbird          Implements thunderbird detach mode, pointing to the extracted file local URL.
   -v --verbose              Display more information.
 """
@@ -69,7 +70,7 @@ from docopt import docopt, parse_defaults
 
 class ImapAttachmentExtractor:
     def __init__(self, host, login, port=993, folder='INBOX', extract_dir="./", no_subdir=False, dir_reg=None,
-                 thunderbird_mode=True, max_size='100K', flagged_action="skip", extract_only=False,
+                 thunderbird_mode=False, max_size='100K', flagged_action="skip", extract_only=False,
                  inline_images=False, dry_run=False, ask_password=False, debug=False, verbose=False):
         """IMAP Attachment extractor.
 
@@ -82,7 +83,7 @@ class ImapAttachmentExtractor:
         :param str dir_reg: Optional regexp to apply when creating subdirectories.
                             Optional replacement separated by ">>", otherwise delete the match.
                             Multiple expressions separated by "::".
-        :param bool thunderbird_mode: Thunderbird detach mode. (default: True)
+        :param bool thunderbird_mode: Thunderbird detach mode. (default: False)
         :param int|str max_size: Extract only attachment bigger than this size.  (default: 100K)
         :param str flagged_action: Flagged/starred message behaviour. [detach, extract, skip] (default: skip)
         :param bool extract_only: Extract only attachments, don't detach from messages. (default: False)
@@ -707,6 +708,7 @@ def main(options, defaults):
     # parse options not in configuration
     conf_file = options['--conf']  # type: str
     list_folders =  options['--list']  # type: bool
+    run = options['--run']  # type: bool
 
     # arguments definition
     arguments = {
@@ -762,6 +764,10 @@ def main(options, defaults):
                 kwargs[a[0]] = int(options[a[1]])
             else:
                 kwargs[a[0]] = options[a[1]]
+
+    # handle --run option
+    if run and kwargs.get('dry_run', False):
+        kwargs['dry_run'] = False
 
     # extract arguments
     extract_kwargs = {

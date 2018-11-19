@@ -328,7 +328,11 @@ class ImapAttachmentExtractor:
 
         to_fetch = []
 
-        status, fetch_data = self.imap.fetch(b','.join(uids), 'BODYSTRUCTURE[PEEK]')
+        try:
+            status, fetch_data = self.imap.fetch(b','.join(uids), 'BODYSTRUCTURE[PEEK]')
+        except IMAP4.error:
+            status, fetch_data = self.imap.fetch(b','.join(uids), 'BODYSTRUCTURE')
+
         if status != "OK":
             print("Could not fetch messages.")
 
@@ -357,16 +361,28 @@ class ImapAttachmentExtractor:
         if status != "OK":
             print("Could not fetch messages")
 
-        for fetch in fetch_data:
-            if fetch == b')':
+        skip_flags = False
+        for i in range(len(fetch_data)):
+            if skip_flags:
+                # previous mail flags part
+                skip_flags = False
                 continue
 
-            uid = fetch[0].split(b' ')[0]
+            fetch = fetch_data[i]
+            if b')' == fetch:
+                continue
 
             flags = ParseFlags(bytes(fetch[0]))
+            if not flags and i + 1 < len(fetch_data) and type(fetch_data[i+1]) == bytes:
+                # check if flags are in the next fetch_data
+                flags = ParseFlags(fetch_data[i+1])
+                if flags:
+                    skip_flags = True
+
             if flags:
                 flags = tuple(map(lambda x: x.decode("utf-8"), flags))
 
+            uid = fetch[0].split(b' ')[0]
             mail = message_from_bytes(fetch[1])  # type: EmailMessage
 
             subject, encoding = decode_header(mail.get("Subject"))[0]

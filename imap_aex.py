@@ -22,7 +22,7 @@ Options:
                               - 2012-04 to 2012-10 : between those months
 
      --dry-run              Dump running information and leave the server intact.
-     --debug                Debug mode, don't delete messages.
+     --debug                Debug mode: append modified messages to the server, but don't delete the source message.
      --dir-reg=<r>          Replace Regular expression to be applied before creating directories.
                             Optional replacement separated by ">>", otherwise delete the match.
                             Multiple expressions separated by "::".
@@ -31,7 +31,7 @@ Options:
                               - ^Drafts$>>Brouillons        Replace by translation.
 
   -e --extract-dir=<d>      Extract attachment to this directory. [Default: ./]
-     --extract-only         Don't detach attachments, only extract.
+     --extract-only         Don't detach attachments, extract only.
      --flagged=<f>          Flagged/starred mail behaviour: [Default: skip]
                               - detach:     detach as a normal mail.
                               - extract:    extract only, leave message intact.
@@ -566,6 +566,9 @@ class ImapAttachmentExtractor:
                 print("Extracted %d files, %s gain." % (self.extracted_nb, human_readable_size(self.extracted_size)))
             else:
                 print("[Dry-run] Extracted %d files, %s gain." % (self.extracted_nb, human_readable_size(self.extracted_size)))
+
+            if self.verbose:
+                print("Thunderbird headers used: %s" % ("yes" if self.thunderbird_mode else "no"))
 
         print()
 

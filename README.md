@@ -115,8 +115,9 @@ Options:
      --dir-reg=<r>          Replace Regular expression to be applied before creating directories.
                             Optional replacement separated by ">>", otherwise delete the match.
                             Multiple expressions separated by "::".
-                              - ^INBOX\/?                   Remove "INBOX" and "INBOX/" subdirectory completely
+                              - ^INBOX\/?                   Remove "INBOX" and "INBOX/" from subdirectory.
                               - ^INBOX$>>Inbox::INBOX\/     Replace "INBOX" by "Inbox", and ignore it as subdirectory.
+                              - ^\[Gmail\]\/?               Remove "[Gmail]" and "[Gmail]/" from subdirectory.
                               - ^Drafts$>>Brouillons        Replace by translation.
 
   -e --extract-dir=<d>      Extract attachment to this directory. [Default: ./]

@@ -60,17 +60,17 @@ option, or comment the `dry-run=yes` configuration line.
 
 ##### Password handling
 
-You can use `keyring` to store a password in with the system secured library. Supported on Linux / Windows / MacOS :
+You can use `keyring` to store a password with the system secured library. Supported on Linux / Windows / MacOS :
 ```bash
 $ keyring set imap_aex:<HOST> <USER>
 ```
 
-Or you can prompt the user for the password on run with the `--password` option.
+Or you can prompt the user for password on run with the `--password` option.
 
 ##### Mozilla Thunderbird 'detach' mode
 
 It is recommended to use the `--thunderbird` option if you use Mozilla Thunderbird. The extractor will then use the
-extended messages headers `X-Mozilla-External-Attachment-URL` and `X-Mozilla-Altered` to link to the local extracted
+extended message headers `X-Mozilla-External-Attachment-URL` and `X-Mozilla-Altered` to link to the local extracted
 file inside the modified message. This simulates the use of _Detach_ action on an attachment in Mozilla Thunderbird.
 
 ##### Running options

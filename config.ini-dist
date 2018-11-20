@@ -66,7 +66,7 @@ login=
 # NB: Is set to yes in the config.ini-dist template, replace by no (or comment) once the configuration has been checked.
 dry-run=yes
 
-# Prompt for password instead of looking in keyring. [Default: no]
+# Prompt for password instead of looking in the keyring. [Default: no]
 ; password=no
 
 # Display more information. [Default: no]

@@ -1,7 +1,7 @@
 """IMAP Attachment extractor.
 
 Works on IMAP SSL server by replacing an email after extracting the attachments.
-Use keyring tool to store password. Initialize with 'keyring set imap_aex:<host> <user> <password>'.
+Use keyring tool to store password. Initialize with 'keyring set imap_aex:<host> <user>'.
 
 Usage: imap_aex [--help] [--verbose] [--debug] [--extract-dir=<e>] [--extract-only] [--folder=<f>] [--date=<d>] [options] [HOST] [USER]
 
@@ -11,7 +11,7 @@ Arguments:
 
 
 Options:
-     --all                  Fetch all mail. Not recommended, prefer --date usage.
+     --all                  Fetch all mail from the folder. Not recommended, prefer '--date' use.
   -c --conf=<c>             Optional configuration file, containing any of the command line options values. [Default: config.ini]
   -d --date=<d>             Date defininition, formatted as [<>]date[to][date]. Date can be y, y-m, or y-m-d.
                               - 2012-12-21 : on this day
@@ -38,11 +38,12 @@ Options:
                               - skip:       don't extract, leave message intact.
   -f --folder=<f>           Mail folder. [Default: INBOX]
 
+     --help                 Display this help message then exit.
      --inline-images        Handle inline images as attachments.
-     --list                 List the server folders and exit.
+     --list                 List the server folders then exit.
      --max-size=<m>         Extract attachments bigger than this size. [Default: 100K]
      --no-subdir            Don't create folder subdirectories inside extract dir.
-     --password             Prompt for password instead of looking in keyring.
+     --password             Prompt for password instead of looking in the keyring.
   -p --port=<p>             IMAP host SSL port. [Default: 993]
      --run                  Force running, even if dry-run found in config file.
      --thunderbird          Implements thunderbird detach mode, pointing to the extracted file local URL.
@@ -117,9 +118,8 @@ class ImapAttachmentExtractor:
         self.no_subdir = no_subdir
         self.dir_reg = []
         if dir_reg is not None:
-            dir_reg = dir_reg.replace('::', '__reg__').replace('>>', '__repl__')
-            for reg in dir_reg.split('__reg__'):
-                self.dir_reg.append(tuple(reg.split('__repl__')))
+            for reg in dir_reg.split('::'):
+                self.dir_reg.append(tuple(reg.split('>>')))
 
         subdir_path = self.folder
         if not self.no_subdir and subdir_path:

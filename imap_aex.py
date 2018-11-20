@@ -137,10 +137,11 @@ class ImapAttachmentExtractor:
         self.extract_only = extract_only
         self.ask_password = ask_password
         self.debug = debug
-        self.verbose = verbose
+        self.verbose = verbose or debug
         
         # stats
         self.extracted_nb = 0
+        self.extracted_from_nb = 0
         self.extracted_size = 0
 
         self.password = None
@@ -430,9 +431,13 @@ class ImapAttachmentExtractor:
             nb_extraction = 0
             part_nb = 1
 
-            print("\nParsing mail: '%s' [%s]" % (subject, mail_date))
+            to_print = []  # print buffer
+
+            to_print.append("")
+            to_print.append("Parsing mail: '%s' [%s]" % (subject, mail_date))
             if is_flagged and 'skip' == self.flagged_action:
-                print("  Skip flagged mail.")
+                if self.verbose:
+                    to_print.append("  Skip flagged mail.")
                 continue
 
             for part in mail.walk():  # type: Message
@@ -463,14 +468,15 @@ class ImapAttachmentExtractor:
                         attachment_filename = attachment_filename.decode()
 
                 if "AttachmentDetached" in part.get("X-Mozilla-Altered", ""):
-                    print("  Attachment '%s' already detached." % attachment_filename)
+                    if self.verbose:
+                        to_print.append("  Attachment '%s' already detached." % attachment_filename)
                     continue
 
                 if part.get("Content-Transfer-Encoding", "") == "base64":
                     try:
                         attachment_content = b64decode(part.get_payload())
                     except BinasciiError:
-                        print("  Error when decoding attachment '%s', leave intact." % attachment_filename)
+                        to_print.append("  Error when decoding attachment '%s', leave intact." % attachment_filename)
                         new_mail.attach(part)
                         continue
                 else:
@@ -479,7 +485,8 @@ class ImapAttachmentExtractor:
                 attachment_size = len(attachment_content)
 
                 if attachment_size < self.max_size:
-                    print("  Attachment '%s' size (%s) is smaller than defined threshold (%s), leave intact." % (attachment_filename, human_readable_size(attachment_size), human_readable_size(self.max_size)))
+                    if self.verbose:
+                        to_print.append("  Attachment '%s' size (%s) is smaller than defined threshold (%s), leave intact." % (attachment_filename, human_readable_size(attachment_size), human_readable_size(self.max_size)))
                     new_mail.attach(part)
                     continue
 
@@ -493,9 +500,9 @@ class ImapAttachmentExtractor:
                     with open(os.path.join(self.extract_dir, filename), "wb") as file:
                         file.write(attachment_content)
 
-                    print("  Extracted '%s' (%s) to '%s'" % (attachment_filename, human_readable_size(attachment_size), os.path.join(self.extract_dir, filename)))
+                    to_print.append("  Extracted '%s' (%s) to '%s'" % (attachment_filename, human_readable_size(attachment_size), os.path.join(self.extract_dir, filename)))
                 else:
-                    print("  [Dry-run] Extracted '%s' (%s) to '%s'" % (attachment_filename, human_readable_size(attachment_size), os.path.join(self.extract_dir, filename)))
+                    to_print.append("  [Dry-run] Extracted '%s' (%s) to '%s'" % (attachment_filename, human_readable_size(attachment_size), os.path.join(self.extract_dir, filename)))
 
                 self.extracted_nb = self.extracted_nb + 1
                 self.extracted_size = self.extracted_size + attachment_size
@@ -508,7 +515,7 @@ class ImapAttachmentExtractor:
                     try:
                         headers_str = "\n".join(map(lambda x: x[0]+": "+x[1], part._headers))
                     except Exception as e:
-                        print("  Error when serializing headers: %s" % repr(e))
+                        to_print.append("  Error when serializing headers: %s" % repr(e))
 
                     new_part = Message()
                     new_part._headers = part._headers
@@ -520,7 +527,12 @@ class ImapAttachmentExtractor:
 
                     new_mail.attach(new_part)
 
-            # print(new_mail)
+            if nb_extraction:
+                self.extracted_from_nb = self.extracted_from_nb + 1
+
+            if to_print:
+                if nb_extraction > 0 or self.verbose:
+                    print("\n".join(to_print))
 
             if nb_extraction > 0 and not self.extract_only and ('detach' == self.flagged_action or not is_flagged):
                 if not self.dry_run:
@@ -535,7 +547,9 @@ class ImapAttachmentExtractor:
                         print("  Append message on IMAP server.")
                 else:
                     print("  [Dry-run] Extracted %s attachment%s, replacing email." % (nb_extraction, "s" if nb_extraction > 1 else ""))
-                    print("  [Dry-run] Append message on IMAP server.")
+
+                    if self.verbose:
+                        print("  [Dry-run] Append message on IMAP server.")
 
                 if not self.debug and not self.dry_run:
                     status, store_data = self.imap.store(uid, '+FLAGS', '\Deleted')
@@ -547,28 +561,31 @@ class ImapAttachmentExtractor:
                         print("  Delete original message.")
 
                 elif self.dry_run:
-                    print("  [Dry-run] Delete original message.")
+                    if self.verbose:
+                        print("  [Dry-run] Delete original message.")
                 else:
                     print("  Debug: would delete original message.")
 
-            elif self.extract_only:
+            elif self.extract_only and nb_extraction > 0:
                 print("  Extracted %s attachment%s." % (nb_extraction, "s" if nb_extraction > 1 else ""))
             elif 'extract' == self.flagged_action:
-                print("  Flagged message, leave intact.")
+                if self.verbose:
+                    print("  Flagged message, leave intact.")
             else:
-                print("  Nothing extracted.")
+                if nb_extraction > 0 or self.verbose:
+                    print("  Nothing extracted.")
 
         print()
         print('Extract finished.')
 
         if self.extracted_size > 0:
             if not self.dry_run:
-                print("Extracted %d files, %s gain." % (self.extracted_nb, human_readable_size(self.extracted_size)))
+                print("  Extracted %d files from %s messages, %s gain." % (self.extracted_nb, self.extracted_from_nb, human_readable_size(self.extracted_size)))
             else:
-                print("[Dry-run] Extracted %d files, %s gain." % (self.extracted_nb, human_readable_size(self.extracted_size)))
+                print("  [Dry-run] Extracted %d files from %s messages, %s gain." % (self.extracted_nb, self.extracted_from_nb, human_readable_size(self.extracted_size)))
 
             if self.verbose:
-                print("Thunderbird headers used: %s" % ("yes" if self.thunderbird_mode else "no"))
+                print("  Thunderbird headers used: %s." % ("yes" if self.thunderbird_mode else "no"))
 
         print()
 

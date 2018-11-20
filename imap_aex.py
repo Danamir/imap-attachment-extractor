@@ -26,8 +26,9 @@ Options:
      --dir-reg=<r>          Replace Regular expression to be applied before creating directories.
                             Optional replacement separated by ">>", otherwise delete the match.
                             Multiple expressions separated by "::".
-                              - ^INBOX\/?                   Remove "INBOX" and "INBOX/" subdirectory completely
+                              - ^INBOX\/?                   Remove "INBOX" and "INBOX/" from subdirectory.
                               - ^INBOX$>>Inbox::INBOX\/     Replace "INBOX" by "Inbox", and ignore it as subdirectory.
+                              - ^\[Gmail\]\/?               Remove "[Gmail]" and "[Gmail]/" from subdirectory.
                               - ^Drafts$>>Brouillons        Replace by translation.
 
   -e --extract-dir=<d>      Extract attachment to this directory. [Default: ./]
@@ -138,6 +139,7 @@ class ImapAttachmentExtractor:
         self.ask_password = ask_password
         self.debug = debug
         self.verbose = verbose or debug
+        self.gmail_mode = "gmail" in self.host
         
         # stats
         self.extracted_nb = 0
@@ -314,7 +316,10 @@ class ImapAttachmentExtractor:
             date_crit = []
 
         # status, search_data = self.imap.search("UTF-8", 'UNDELETED', 'ON "27-aug-2018"')
-        status, search_data = self.imap.search("UTF-8", 'UNDELETED', *date_crit)
+        if not self.gmail_mode:
+            status, search_data = self.imap.search("UTF-8", 'UNDELETED', *date_crit)
+        else:
+            status, search_data = self.imap.search("UTF-8", 'UNDELETED', 'X-GM-RAW', 'has:attachment', *date_crit)
         if status != "OK":
             raise RuntimeWarning("Could not search in %s" % folder)
 
@@ -339,15 +344,16 @@ class ImapAttachmentExtractor:
             print("Could not fetch messages.")
 
         for structure in fetch_data:  # type: bytes
-            multipart = b"BODYSTRUCTURE (((" in structure
-            if not multipart:
-                continue  # skip simple messages
+            if not self.gmail_mode:
+                multipart = b"BODYSTRUCTURE (((" in structure
+                if not multipart:
+                    continue  # skip non-multipart messages
 
             reg_attachment = "attachment|application"
             if self.inline_images:
                 reg_attachment = reg_attachment+"|image"
 
-            has_attachments = re.match('^.*"(%s)".*$' % reg_attachment, structure.decode("utf-8")) is not None
+            has_attachments = re.match('^.*"(%s)".*$' % reg_attachment, structure.decode("utf-8"), re.IGNORECASE) is not None
             if not has_attachments:
                 continue
 
@@ -402,7 +408,11 @@ class ImapAttachmentExtractor:
             date_match = re.match("^(.*\d{4} \d{2}:\d{2}:\d{2}).*$", mail_date)
             if date_match:
                 mail_date = date_match.group(1)
-            mail_date = datetime.strptime(mail_date, "%a, %d %b %Y %H:%M:%S")
+
+            try:
+                mail_date = datetime.strptime(mail_date, "%a, %d %b %Y %H:%M:%S")
+            except ValueError:
+                mail_date = datetime.strptime(mail_date, "%d %b %Y %H:%M:%S")
 
             if dates is not None:
                 date_ok = False
@@ -472,7 +482,7 @@ class ImapAttachmentExtractor:
                         to_print.append("  Attachment '%s' already detached." % attachment_filename)
                     continue
 
-                if part.get("Content-Transfer-Encoding", "") == "base64":
+                if part.get("Content-Transfer-Encoding", "").lower() == "base64":
                     try:
                         attachment_content = b64decode(part.get_payload())
                     except BinasciiError:
@@ -537,8 +547,7 @@ class ImapAttachmentExtractor:
             if nb_extraction > 0 and not self.extract_only and ('detach' == self.flagged_action or not is_flagged):
                 if not self.dry_run:
                     print("  Extracted %s attachment%s, replacing email." % (nb_extraction, "s" if nb_extraction > 1 else ""))
-                    status, append_data = self.imap.append(self.folder, " ".join(flags), '', new_mail.as_bytes())
-                    # status, append_data = self.imap.append(self.folder, '', '', str(new_mail).encode("utf-8"))
+                    status, append_data = self.imap.append(folder, " ".join(flags), '', new_mail.as_bytes())
                     if status != "OK":
                         print("  Could not append message to IMAP server.")
                         continue

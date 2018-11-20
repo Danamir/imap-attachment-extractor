@@ -1,25 +1,76 @@
 [imap]
-; host=
-; login=
+# IMAP host name.
+host=
+
+# IMAP user name.
+login=
+
+# IMAP SSL port. [Default: 993]
 ; port=993
 
+
 [parameters]
+# Date defininition, formatted as [<>]date[to][date]. Date can be y, y-m, or y-m-d.
+# Examples:
+#   - 2012-12-21 : on this day
+#   - 2012-12 : on this month
+#   - 2012 : on this year
+#   - >2012 : since this year
+#   - <2012-12-21 : before this day
+#   - 2012-04 to 2012-10 : between those months
 ; date=
+
+# Fetch ALL messages in the folder.[Default: no]
 ; all=no
 
+# Mail folder. [Default: INBOX]
 ; folder=INBOX
+
+# Extract attachment to this directory. [Default: ./]
 ; extract-dir=./
+
+# Extract attachments bigger than this size. [Default: 100K]
+# Human-readable size accepted, ie. : 1MB, 500KB.
 ; max-size=100K
+
+# Flagged/starred mail behaviour: [Default: skip]
+#   - detach:     detach as a normal mail.
+#   - extract:    extract only, leave message intact.
+#   - skip:       don't extract, leave message intact.
 ; flagged-action=skip
+
+# Replace Regular expression to be applied before creating directories.
+#   Optional replacement separated by ">>", otherwise delete the match.
+#   Multiple expressions separated by "::".
+# Examples:
+#   - ^INBOX\/?                   Remove "INBOX" and "INBOX/" subdirectory completely
+#   - ^INBOX$>>Inbox::INBOX\/     Replace "INBOX" by "Inbox", and ignore it as subdirectory.
+#   - ^Drafts$>>Brouillons        Replace by translation.
 ; dir-reg=
 
+
 [options]
+# Don't create folder subdirectories inside extract dir. [Default: no]
 ; no-subdir=no
+
+# Implements thunderbird detach mode, pointing to the extracted file local URL. [Default: no]
 ; thunderbird=no
+
+# Don't detach attachments, extract only. [Default: no]
 ; extract-only=no
+
+# Handle inline images as attachments. [Default: no]
 ; inline-images=no
-; dry-run=no
+
+# Dump running information and leave the server intact. [Default: no]
+# NB: Is set to yes in the config.ini-dist template, replace by no (or comment) once the configuration has been checked.
+dry-run=yes
+
+# Prompt for password instead of looking in keyring. [Default: no]
 ; password=no
 
+# Display more information. [Default: no]
 ; verbose=no
+
+# Debug mode: append modified messages to the server, but don't delete the source message. [Default: no]
 ; debug=no

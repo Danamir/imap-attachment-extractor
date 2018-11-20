@@ -73,4 +73,5 @@ dry-run=yes
 ; verbose=no
 
 # Debug mode: append modified messages to the server, but don't delete the source message. [Default: no]
+# NB: Force verbose mode.
 ; debug=no

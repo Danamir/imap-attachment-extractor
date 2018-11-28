@@ -60,7 +60,7 @@ import getpass
 from configparser import ConfigParser
 
 from datetime import date, datetime
-from email import message_from_bytes
+from email import message_from_bytes, policy
 from email.message import EmailMessage, Message
 from email.header import decode_header
 from imaplib import IMAP4_SSL, IMAP4, Time2Internaldate, ParseFlags
@@ -532,7 +532,8 @@ class ImapAttachmentExtractor:
                     new_part.set_payload("You deleted an attachment from this message. The original MIME headers for the attachment were:\n%s" % headers_str)
 
                     new_part.replace_header("Content-Transfer-Encoding", "")
-                    new_part.add_header("X-Mozilla-External-Attachment-URL", "file:///%s/%s" % (self.extract_dir.replace("\\", "/"), filename))
+                    url_path = "file:///%s/%s" % (self.extract_dir.replace("\\", "/"), filename)
+                    new_part.add_header("X-Mozilla-External-Attachment-URL", url_path)
                     new_part.add_header("X-Mozilla-Altered",  'AttachmentDetached; date=%s' % Time2Internaldate(time()))
 
                     new_mail.attach(new_part)
@@ -547,7 +548,7 @@ class ImapAttachmentExtractor:
             if nb_extraction > 0 and not self.extract_only and ('detach' == self.flagged_action or not is_flagged):
                 if not self.dry_run:
                     print("  Extracted %s attachment%s, replacing email." % (nb_extraction, "s" if nb_extraction > 1 else ""))
-                    status, append_data = self.imap.append(folder, " ".join(flags), '', new_mail.as_bytes())
+                    status, append_data = self.imap.append(imaputf7encode(folder), " ".join(flags), '', new_mail.as_bytes(policy=policy.SMTPUTF8))
                     if status != "OK":
                         print("  Could not append message to IMAP server.")
                         continue

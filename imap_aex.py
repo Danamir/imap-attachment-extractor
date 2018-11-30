@@ -344,11 +344,6 @@ class ImapAttachmentExtractor:
             print("Could not fetch messages.")
 
         for structure in fetch_data:  # type: bytes
-            if not self.gmail_mode:
-                multipart = b"BODYSTRUCTURE (((" in structure
-                if not multipart:
-                    continue  # skip non-multipart messages
-
             reg_attachment = "attachment|application"
             if self.inline_images:
                 reg_attachment = reg_attachment+"|image"
@@ -651,6 +646,11 @@ def human_readable_size_to_bytes(size_label, suffix='B'):
     :return: The file size.
     :rtype: int
     """
+    if size_label is None:
+        return None
+
+    size_label = size_label.upper()
+
     match = re.match("^(\d[\d.]*)(K|M|G|T|P|E|Z)?(%s)?$" % suffix, size_label)
 
     if not match:

@@ -485,7 +485,10 @@ class ImapAttachmentExtractor:
                         new_mail.attach(part)
                         continue
                 else:
-                    attachment_content = part.get_payload().encode("utf-8")
+                    if isinstance(part.get_payload(), list):
+                        attachment_content = part.get_payload(1).encode("utf-8")
+                    else:
+                        attachment_content = part.get_payload().encode("utf-8")
 
                 attachment_size = len(attachment_content)
 

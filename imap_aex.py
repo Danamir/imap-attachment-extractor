@@ -348,7 +348,11 @@ class ImapAttachmentExtractor:
             if self.inline_images:
                 reg_attachment = reg_attachment+"|image"
 
-            has_attachments = re.match('^.*"(%s)".*$' % reg_attachment, structure.decode("utf-8"), re.IGNORECASE) is not None
+            try:
+                has_attachments = re.match('^.*"(%s)".*$' % reg_attachment, structure.decode("utf-8"), re.IGNORECASE) is not None
+            except AttributeError as e:
+                print("Failed to process message. Error: %s" % e)
+                has_attachments = False
             if not has_attachments:
                 continue
 

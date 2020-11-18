@@ -348,19 +348,11 @@ class ImapAttachmentExtractor:
             if self.inline_images:
                 reg_attachment = reg_attachment+"|image"
 
-            try:
-                has_attachments = re.match('^.*"(%s)".*$' % reg_attachment, structure.decode("utf-8"), re.IGNORECASE) is not None
-            except AttributeError as e:
-                print("Failed to process message. Error: %s" % e)
-                has_attachments = False
+            has_attachments = re.match('^.*"(%s)".*$' % reg_attachment, structure.decode("utf-8"), re.IGNORECASE) is not None
             if not has_attachments:
                 continue
-            uid = structure.split(b' ')[0]
-            if uid:
-                to_fetch.append(uid)
-            else:
-                # Probably an eml attachment
-                pass
+
+            to_fetch.append(structure.split(b' ')[0])
 
         print("%d messages with attachments." % len(to_fetch))
         print()
@@ -368,228 +360,228 @@ class ImapAttachmentExtractor:
         if not to_fetch:
             exit(0)
 
-        status, fetch_data = self.imap.fetch(b','.join(to_fetch), '(FLAGS RFC822)')
-        if status != "OK":
-            print("Could not fetch messages")
+        for uid in to_fetch:
+            status, fetch_data = self.imap.fetch(uid, '(FLAGS RFC822)')
+            if status != "OK":
+                print("Could not fetch messages")
 
-        skip_flags = False
-        for i in range(len(fetch_data)):
-            if skip_flags:
-                # previous mail flags part
-                skip_flags = False
-                continue
+            skip_flags = False
+            for i in range(len(fetch_data)):
+                if skip_flags:
+                    # previous mail flags part
+                    skip_flags = False
+                    continue
 
-            fetch = fetch_data[i]
-            if b')' == fetch:
-                continue
+                fetch = fetch_data[i]
+                if b')' == fetch:
+                    continue
 
-            flags = ParseFlags(bytes(fetch[0]))
-            if not flags and i + 1 < len(fetch_data) and type(fetch_data[i+1]) == bytes:
-                # check if flags are in the next fetch_data
-                flags = ParseFlags(fetch_data[i+1])
+                flags = ParseFlags(bytes(fetch[0]))
+                if not flags and i + 1 < len(fetch_data) and type(fetch_data[i+1]) == bytes:
+                    # check if flags are in the next fetch_data
+                    flags = ParseFlags(fetch_data[i+1])
+                    if flags:
+                        skip_flags = True
+
                 if flags:
-                    skip_flags = True
+                    flags = tuple(map(lambda x: x.decode("utf-8"), flags))
 
-            if flags:
-                flags = tuple(map(lambda x: x.decode("utf-8"), flags))
+                mail = message_from_bytes(fetch[1])  # type: EmailMessage
 
-            uid = fetch[0].split(b' ')[0]
-            mail = message_from_bytes(fetch[1])  # type: EmailMessage
+                subject, encoding = decode_header(mail.get("Subject"))[0]
+                if encoding:
+                    if not encoding.startswith('unknown'):
+                        subject = subject.decode(encoding)
+                    else:
+                        subject = str(subject)
+                elif type(subject) == bytes:
+                    subject = subject.decode()
 
-            subject, encoding = decode_header(mail.get("Subject"))[0]
-            if encoding:
-                if not encoding.startswith('unknown'):
-                    subject = subject.decode(encoding)
-                else:
-                    subject = str(subject)
-            elif type(subject) == bytes:
-                subject = subject.decode()
+                is_flagged = "\\Flagged" in flags
 
-            is_flagged = "\\Flagged" in flags
+                mail_date = mail.get("Date", None)
+                date_match = re.match("^(.*\d{4} \d{2}:\d{2}:\d{2}).*$", mail_date)
+                if date_match:
+                    mail_date = date_match.group(1)
 
-            mail_date = mail.get("Date", None)
-            date_match = re.match("^(.*\d{4} \d{2}:\d{2}:\d{2}).*$", mail_date)
-            if date_match:
-                mail_date = date_match.group(1)
+                try:
+                    mail_date = datetime.strptime(mail_date, "%a, %d %b %Y %H:%M:%S")
+                except ValueError:
+                    mail_date = datetime.strptime(mail_date, "%d %b %Y %H:%M:%S")
 
-            try:
-                mail_date = datetime.strptime(mail_date, "%a, %d %b %Y %H:%M:%S")
-            except ValueError:
-                mail_date = datetime.strptime(mail_date, "%d %b %Y %H:%M:%S")
+                if dates is not None:
+                    date_ok = False
+                    check_date = mail_date.strftime("%Y-%m-%d")
 
-            if dates is not None:
-                date_ok = False
-                check_date = mail_date.strftime("%Y-%m-%d")
+                    if dates[0]:
+                        date_ok = check_date == dates[0]
+                    else:
+                        if dates[1] and not dates[2]:
+                            date_ok = check_date >= dates[1]
+                        elif dates[2] and not dates[1]:
+                            date_ok = check_date <= dates[2]
+                        elif dates[1] and dates[2]:
+                            date_ok = dates[1] <= check_date <= dates[2]
 
-                if dates[0]:
-                    date_ok = check_date == dates[0]
-                else:
-                    if dates[1] and not dates[2]:
-                        date_ok = check_date >= dates[1]
-                    elif dates[2] and not dates[1]:
-                        date_ok = check_date <= dates[2]
-                    elif dates[1] and dates[2]:
-                        date_ok = dates[1] <= check_date <= dates[2]
+                    if not date_ok:
+                        if self.verbose:
+                            print("\nSkip email: '%s' [%s] (possible previous extract)." % (subject, mail_date))
+                        continue
 
-                if not date_ok:
+                new_mail = EmailMessage()
+                new_mail._headers = mail._headers
+
+                has_alternative = False
+                nb_alternative = 0
+                nb_extraction = 0
+                part_nb = 1
+
+                to_print = []  # print buffer
+
+                to_print.append("")
+                to_print.append("Parsing mail: '%s' [%s]" % (subject, mail_date))
+                if is_flagged and 'skip' == self.flagged_action:
                     if self.verbose:
-                        print("\nSkip email: '%s' [%s] (possible previous extract)." % (subject, mail_date))
+                        to_print.append("  Skip flagged mail.")
                     continue
 
-            new_mail = EmailMessage()
-            new_mail._headers = mail._headers
+                for part in mail.walk():  # type: Message
+                    if part.get_content_type().startswith("multipart/"):
+                        if part.get_content_type() == "multipart/alternative":
+                            new_mail.attach(part)  # add text/plain and text/html alternatives
+                            has_alternative = True
+                        continue
 
-            has_alternative = False
-            nb_alternative = 0
-            nb_extraction = 0
-            part_nb = 1
+                    if has_alternative and nb_alternative < 2 and (part.get_content_type() == "text/plain" or part.get_content_type() == "text/html"):
+                        nb_alternative = nb_alternative + 1
+                        continue  # text/plain and text/html already added in multipart/alternative
 
-            to_print = []  # print buffer
-
-            to_print.append("")
-            to_print.append("Parsing mail: '%s' [%s]" % (subject, mail_date))
-            if is_flagged and 'skip' == self.flagged_action:
-                if self.verbose:
-                    to_print.append("  Skip flagged mail.")
-                continue
-
-            for part in mail.walk():  # type: Message
-                if part.get_content_type().startswith("multipart/"):
-                    if part.get_content_type() == "multipart/alternative":
-                        new_mail.attach(part)  # add text/plain and text/html alternatives
-                        has_alternative = True
-                    continue
-
-                if has_alternative and nb_alternative < 2 and (part.get_content_type() == "text/plain" or part.get_content_type() == "text/html"):
-                    nb_alternative = nb_alternative + 1
-                    continue  # text/plain and text/html already added in multipart/alternative
-
-                is_attachment = part.get_content_disposition() is not None and part.get_content_disposition().startswith("attachment")
-                if not is_attachment:
-                    new_mail.attach(part)
-                    continue
-
-                part_nb = part_nb + 1
-
-                if not part.get_filename():
-                    attachment_filename = "part.%d" % part_nb
-                else:
-                    attachment_filename, encoding = decode_header(part.get_filename())[0]
-                    if encoding:
-                        attachment_filename = attachment_filename.decode(encoding)
-                    elif type(attachment_filename) == bytes:
-                        attachment_filename = attachment_filename.decode()
-
-                if "AttachmentDetached" in part.get("X-Mozilla-Altered", ""):
-                    if self.verbose:
-                        to_print.append("  Attachment '%s' already detached." % attachment_filename)
-                    continue
-
-                if part.get("Content-Transfer-Encoding", "").lower() == "base64":
-                    try:
-                        attachment_content = b64decode(part.get_payload())
-                    except BinasciiError:
-                        to_print.append("  Error when decoding attachment '%s', leave intact." % attachment_filename)
+                    is_attachment = part.get_content_disposition() is not None and part.get_content_disposition().startswith("attachment")
+                    if not is_attachment:
                         new_mail.attach(part)
                         continue
-                else:
-                    if isinstance(part.get_payload(), list):
-                        attachment_content = part.get_payload(1).encode("utf-8")
+
+                    part_nb = part_nb + 1
+
+                    if not part.get_filename():
+                        attachment_filename = "part.%d" % part_nb
                     else:
-                        attachment_content = part.get_payload().encode("utf-8")
+                        attachment_filename, encoding = decode_header(part.get_filename())[0]
+                        if encoding:
+                            attachment_filename = attachment_filename.decode(encoding)
+                        elif type(attachment_filename) == bytes:
+                            attachment_filename = attachment_filename.decode()
 
-                attachment_size = len(attachment_content)
-
-                if attachment_size < self.max_size:
-                    if self.verbose:
-                        to_print.append("  Attachment '%s' size (%s) is smaller than defined threshold (%s), leave intact." % (attachment_filename, human_readable_size(attachment_size), human_readable_size(self.max_size)))
-                    new_mail.attach(part)
-                    continue
-
-                filename = "%s - %s" % (mail_date.strftime("%Y-%m-%d"), attachment_filename)
-                idx = 0
-                while os.path.exists(os.path.join(self.extract_dir, filename)):
-                    idx = idx + 1
-                    filename = re.sub("^(\d{4}-\d{2}-\d{2}) (?:\(\d+\) )?- (.*)$", "\g<1> (%02d) - \g<2>" % idx, filename)
-
-                if not self.dry_run:
-                    with open(os.path.join(self.extract_dir, filename), "wb") as file:
-                        file.write(attachment_content)
-
-                    to_print.append("  Extracted '%s' (%s) to '%s'" % (attachment_filename, human_readable_size(attachment_size), os.path.join(self.extract_dir, filename)))
-                else:
-                    to_print.append("  [Dry-run] Extracted '%s' (%s) to '%s'" % (attachment_filename, human_readable_size(attachment_size), os.path.join(self.extract_dir, filename)))
-
-                self.extracted_nb = self.extracted_nb + 1
-                self.extracted_size = self.extracted_size + attachment_size
-
-                nb_extraction = nb_extraction + 1
-
-                if self.thunderbird_mode and ('detach' == self.flagged_action or not is_flagged):
-                    # replace attachement by local file URL
-                    headers_str = ""
-                    try:
-                        headers_str = "\n".join(map(lambda x: x[0]+": "+x[1], part._headers))
-                    except Exception as e:
-                        to_print.append("  Error when serializing headers: %s" % repr(e))
-
-                    new_part = Message()
-                    new_part._headers = part._headers
-                    new_part.set_payload("You deleted an attachment from this message. The original MIME headers for the attachment were:\n%s" % headers_str)
-
-                    new_part.replace_header("Content-Transfer-Encoding", "")
-                    url_path = "file:///%s/%s" % (self.extract_dir.replace("\\", "/"), filename)
-                    new_part.add_header("X-Mozilla-External-Attachment-URL", url_path)
-                    new_part.add_header("X-Mozilla-Altered",  'AttachmentDetached; date=%s' % Time2Internaldate(time()))
-
-                    new_mail.attach(new_part)
-
-            if nb_extraction:
-                self.extracted_from_nb = self.extracted_from_nb + 1
-
-            if to_print:
-                if nb_extraction > 0 or self.verbose:
-                    print("\n".join(to_print))
-
-            if nb_extraction > 0 and not self.extract_only and ('detach' == self.flagged_action or not is_flagged):
-                if not self.dry_run:
-                    print("  Extracted %s attachment%s, replacing email." % (nb_extraction, "s" if nb_extraction > 1 else ""))
-                    status, append_data = self.imap.append(imaputf7encode(folder), " ".join(flags), '', new_mail.as_bytes(policy=policy.SMTPUTF8))
-                    if status != "OK":
-                        print("  Could not append message to IMAP server.")
+                    if "AttachmentDetached" in part.get("X-Mozilla-Altered", ""):
+                        if self.verbose:
+                            to_print.append("  Attachment '%s' already detached." % attachment_filename)
                         continue
 
-                    if self.verbose:
-                        print("  Append message on IMAP server.")
-                else:
-                    print("  [Dry-run] Extracted %s attachment%s, replacing email." % (nb_extraction, "s" if nb_extraction > 1 else ""))
+                    if part.get("Content-Transfer-Encoding", "").lower() == "base64":
+                        try:
+                            attachment_content = b64decode(part.get_payload())
+                        except BinasciiError:
+                            to_print.append("  Error when decoding attachment '%s', leave intact." % attachment_filename)
+                            new_mail.attach(part)
+                            continue
+                    else:
+                        if isinstance(part.get_payload(), list):
+                            attachment_content = part.get_payload(1).encode("utf-8")
+                        else:
+                            attachment_content = part.get_payload().encode("utf-8")
 
-                    if self.verbose:
-                        print("  [Dry-run] Append message on IMAP server.")
+                    attachment_size = len(attachment_content)
 
-                if not self.debug and not self.dry_run:
-                    status, store_data = self.imap.store(uid, '+FLAGS', '\Deleted')
-                    if status != "OK":
-                        print("  Could not delete original message from IMAP server.")
+                    if attachment_size < self.max_size:
+                        if self.verbose:
+                            to_print.append("  Attachment '%s' size (%s) is smaller than defined threshold (%s), leave intact." % (attachment_filename, human_readable_size(attachment_size), human_readable_size(self.max_size)))
+                        new_mail.attach(part)
                         continue
 
-                    if self.verbose:
-                        print("  Delete original message.")
+                    filename = "%s - %s" % (mail_date.strftime("%Y-%m-%d"), attachment_filename)
+                    idx = 0
+                    while os.path.exists(os.path.join(self.extract_dir, filename)):
+                        idx = idx + 1
+                        filename = re.sub("^(\d{4}-\d{2}-\d{2}) (?:\(\d+\) )?- (.*)$", "\g<1> (%02d) - \g<2>" % idx, filename)
 
-                elif self.dry_run:
+                    if not self.dry_run:
+                        with open(os.path.join(self.extract_dir, filename), "wb") as file:
+                            file.write(attachment_content)
+
+                        to_print.append("  Extracted '%s' (%s) to '%s'" % (attachment_filename, human_readable_size(attachment_size), os.path.join(self.extract_dir, filename)))
+                    else:
+                        to_print.append("  [Dry-run] Extracted '%s' (%s) to '%s'" % (attachment_filename, human_readable_size(attachment_size), os.path.join(self.extract_dir, filename)))
+
+                    self.extracted_nb = self.extracted_nb + 1
+                    self.extracted_size = self.extracted_size + attachment_size
+
+                    nb_extraction = nb_extraction + 1
+
+                    if self.thunderbird_mode and ('detach' == self.flagged_action or not is_flagged):
+                        # replace attachement by local file URL
+                        headers_str = ""
+                        try:
+                            headers_str = "\n".join(map(lambda x: x[0]+": "+x[1], part._headers))
+                        except Exception as e:
+                            to_print.append("  Error when serializing headers: %s" % repr(e))
+
+                        new_part = Message()
+                        new_part._headers = part._headers
+                        new_part.set_payload("You deleted an attachment from this message. The original MIME headers for the attachment were:\n%s" % headers_str)
+
+                        new_part.replace_header("Content-Transfer-Encoding", "")
+                        url_path = "file:///%s/%s" % (self.extract_dir.replace("\\", "/"), filename)
+                        new_part.add_header("X-Mozilla-External-Attachment-URL", url_path)
+                        new_part.add_header("X-Mozilla-Altered",  'AttachmentDetached; date=%s' % Time2Internaldate(time()))
+
+                        new_mail.attach(new_part)
+
+                if nb_extraction:
+                    self.extracted_from_nb = self.extracted_from_nb + 1
+
+                if to_print:
+                    if nb_extraction > 0 or self.verbose:
+                        print("\n".join(to_print))
+
+                if nb_extraction > 0 and not self.extract_only and ('detach' == self.flagged_action or not is_flagged):
+                    if not self.dry_run:
+                        print("  Extracted %s attachment%s, replacing email." % (nb_extraction, "s" if nb_extraction > 1 else ""))
+                        status, append_data = self.imap.append(imaputf7encode(folder), " ".join(flags), '', new_mail.as_bytes(policy=policy.SMTPUTF8))
+                        if status != "OK":
+                            print("  Could not append message to IMAP server.")
+                            continue
+
+                        if self.verbose:
+                            print("  Append message on IMAP server.")
+                    else:
+                        print("  [Dry-run] Extracted %s attachment%s, replacing email." % (nb_extraction, "s" if nb_extraction > 1 else ""))
+
+                        if self.verbose:
+                            print("  [Dry-run] Append message on IMAP server.")
+
+                    if not self.debug and not self.dry_run:
+                        status, store_data = self.imap.store(uid, '+FLAGS', '\Deleted')
+                        if status != "OK":
+                            print("  Could not delete original message from IMAP server.")
+                            continue
+
+                        if self.verbose:
+                            print("  Delete original message.")
+
+                    elif self.dry_run:
+                        if self.verbose:
+                            print("  [Dry-run] Delete original message.")
+                    else:
+                        print("  Debug: would delete original message.")
+
+                elif self.extract_only and nb_extraction > 0:
+                    print("  Extracted %s attachment%s." % (nb_extraction, "s" if nb_extraction > 1 else ""))
+                elif 'extract' == self.flagged_action:
                     if self.verbose:
-                        print("  [Dry-run] Delete original message.")
+                        print("  Flagged message, leave intact.")
                 else:
-                    print("  Debug: would delete original message.")
-
-            elif self.extract_only and nb_extraction > 0:
-                print("  Extracted %s attachment%s." % (nb_extraction, "s" if nb_extraction > 1 else ""))
-            elif 'extract' == self.flagged_action:
-                if self.verbose:
-                    print("  Flagged message, leave intact.")
-            else:
-                if nb_extraction > 0 or self.verbose:
-                    print("  Nothing extracted.")
+                    if nb_extraction > 0 or self.verbose:
+                        print("  Nothing extracted.")
 
         print()
         print('Extract finished.')

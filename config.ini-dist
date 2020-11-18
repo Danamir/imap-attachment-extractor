@@ -37,7 +37,7 @@ login=
 #   - detach:     detach as a normal mail.
 #   - extract:    extract only, leave message intact.
 #   - skip:       don't extract, leave message intact.
-; flagged-action=skip
+; flagged=skip
 
 # Replace Regular expression to be applied before creating directories.
 #   Optional replacement separated by ">>", otherwise delete the match.

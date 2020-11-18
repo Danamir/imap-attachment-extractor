@@ -355,8 +355,12 @@ class ImapAttachmentExtractor:
                 has_attachments = False
             if not has_attachments:
                 continue
-
-            to_fetch.append(structure.split(b' ')[0])
+            uid = structure.split(b' ')[0]
+            if uid:
+                to_fetch.append(uid)
+            else:
+                # Probably an eml attachment
+                pass
 
         print("%d messages with attachments." % len(to_fetch))
         print()

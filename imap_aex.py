@@ -51,6 +51,7 @@ Options:
   -v --verbose              Display more information.
 """
 import calendar
+import imaplib
 import sys
 from binascii import Error as BinasciiError
 import os
@@ -343,7 +344,25 @@ class ImapAttachmentExtractor:
         if status != "OK":
             print("Could not fetch messages.")
 
+        merge_previous = False
+        previous_structure = b''
+
         for structure in fetch_data:  # type: bytes
+            if type(structure) in (list, tuple):
+                if len(structure) == 2:
+                    structure = structure[0] + b'"'+structure[1]+b'"'
+                else:
+                    structure = b' '.join(structure)
+
+            if not structure.endswith(b')'):
+                previous_structure = b''+structure
+                merge_previous = True
+                continue
+
+            if merge_previous:
+                structure = previous_structure + structure
+                merge_previous = False
+
             reg_attachment = "attachment|application"
             if self.inline_images:
                 reg_attachment = reg_attachment+"|image"
@@ -356,6 +375,7 @@ class ImapAttachmentExtractor:
             if not has_attachments:
                 continue
             uid = structure.split(b' ')[0]
+
             if uid:
                 to_fetch.append(uid)
             else:
@@ -369,7 +389,12 @@ class ImapAttachmentExtractor:
             exit(0)
 
         for uid in to_fetch:
-            status, fetch_data = self.imap.fetch(uid, '(FLAGS RFC822)')
+            try:
+                status, fetch_data = self.imap.fetch(uid, '(FLAGS RFC822)')
+            except imaplib.IMAP4.error as e:
+                print("Encountered error when reading mail uid %s: %s" % (uid, repr(e)))
+                continue
+
             if status != "OK":
                 print("Could not fetch messages")
 

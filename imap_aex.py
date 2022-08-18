@@ -587,7 +587,7 @@ class ImapAttachmentExtractor:
                 if nb_extraction > 0 and not self.extract_only and ('detach' == self.flagged_action or not is_flagged):
                     if not self.dry_run:
                         print("  Extracted %s attachment%s, replacing email." % (nb_extraction, "s" if nb_extraction > 1 else ""))
-                        status, append_data = self.imap.append(imaputf7encode(folder), " ".join(flags), '', new_mail.as_bytes(policy=policy.SMTPUTF8))
+                        status, append_data = self.imap.append(imaputf7encode(folder), " ".join(flags), mail_date.astimezone() if mail_date else '', new_mail.as_bytes(policy=policy.SMTPUTF8))
                         if status != "OK":
                             print("  Could not append message to IMAP server.")
                             continue

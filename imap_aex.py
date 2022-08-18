@@ -419,7 +419,15 @@ class ImapAttachmentExtractor:
                 if flags:
                     flags = tuple(map(lambda x: x.decode("utf-8"), flags))
 
-                mail = message_from_bytes(fetch[1])  # type: EmailMessage
+                try:
+                    mail = message_from_bytes(fetch[1])  # type: EmailMessage
+                except AttributeError as e:
+                    print(f"\nMail parsing error: {e}", end="")
+                    if self.verbose:
+                        print(f"\n  Mail content:\n  {fetch}")
+                    else:
+                        print(". (Add --verbose to check the mail content)")
+                    continue
 
                 subject, encoding = decode_header(mail.get("Subject"))[0]
                 if encoding:
